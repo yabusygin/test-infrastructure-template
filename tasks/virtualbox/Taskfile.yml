@@ -1,0 +1,296 @@
+# https://taskfile.dev
+
+version: "3"
+
+tasks:
+  print-python:
+    cmds:
+      - echo '{{.PYTHON}}'
+  create-instance:
+    requires:
+      vars:
+        - NAME
+        - GROUP
+        - BASE_DIR
+        - OS_TYPE
+        - HOST_SSH_PORT
+        - STORAGE_SIZE
+        - SOURCE_IMAGE_FILE
+        - SSH_AUTHORIZED_KEY
+        - PORT_FORWARDING_RULES
+        - NETWORK_INTERFACES
+    vars:
+      CPUS: "{{.CPUS}}"
+      MEMORY: "{{.MEMORY}}"
+      OPTS: "{{.OPTS}}"
+      PORT_FORWARDING_RULES:
+        ref: fromJson .PORT_FORWARDING_RULES
+      NETWORK_INTERFACES:
+        ref: fromJson .NETWORK_INTERFACES
+    cmds:
+      - task: create-minimal-instance
+        vars:
+          NAME: "{{.NAME}}"
+          GROUP: "{{.GROUP}}"
+          BASE_DIR: "{{.BASE_DIR}}"
+          OS_TYPE: "{{.OS_TYPE}}"
+      - task: update-instance
+        vars:
+          INSTANCE: "{{.NAME}}"
+          OPTS: >-
+            --boot1=disk
+            --boot2=none
+            --boot3=none
+            --boot4=none
+            --nic1=nat
+            --nic-type1=virtio
+            --nic-promisc1=deny
+            --mac-address1=auto
+            --cable-connected1=on
+            --nat-pf1=ssh,tcp,127.0.0.1,{{.HOST_SSH_PORT}},,22
+            --nat-localhostreachable1=off
+
+      # fix kernel panic when VM is booted from resized disk
+      # https://bugs.launchpad.net/ubuntu/+source/cloud-initramfs-tools/+bug/1123220
+      - task: update-instance
+        vars:
+          INSTANCE: "{{.NAME}}"
+          OPTS: >-
+            --uart1=0x03F8 4
+            --uart-mode1=file /dev/null
+
+      - task: update-instance
+        vars:
+          INSTANCE: "{{.NAME}}"
+          OPTS: --cpus={{.CPUS}}
+      - task: update-instance
+        vars:
+          INSTANCE: "{{.NAME}}"
+          OPTS: --memory={{.MEMORY}}
+      - task: update-instance
+        vars:
+          INSTANCE: "{{.NAME}}"
+          OPTS: "{{.OPTS}}"
+      - task: add-storage-controller
+        vars:
+          INSTANCE: "{{.NAME}}"
+      - task: create-storage
+        vars:
+          STORAGE_FILE: "{{.BASE_DIR}}{{.GROUP}}/{{.NAME}}/storage.vdi"
+          STORAGE_SIZE: "{{.STORAGE_SIZE}}"
+          SOURCE_IMAGE_FILE: "{{.SOURCE_IMAGE_FILE}}"
+      - task: attach-storage
+        vars:
+          INSTANCE: "{{.NAME}}"
+          STORAGE_FILE: "{{.BASE_DIR}}{{.GROUP}}/{{.NAME}}/storage.vdi"
+      - task: create-seed-source
+        vars:
+          SOURCE_DIR: "{{.BASE_DIR}}{{.GROUP}}/{{.NAME}}/seed"
+          HOSTNAME: "{{.NAME}}"
+          SSH_AUTHORIZED_KEY: "{{.SSH_AUTHORIZED_KEY}}"
+      - task: create-seed
+        vars:
+          SEED_FILE: "{{.BASE_DIR}}{{.GROUP}}/{{.NAME}}/seed.iso"
+          SOURCE_DIR: "{{.BASE_DIR}}{{.GROUP}}/{{.NAME}}/seed"
+      - task: attach-seed
+        vars:
+          INSTANCE: "{{.NAME}}"
+          SEED_FILE: "{{.BASE_DIR}}{{.GROUP}}/{{.NAME}}/seed.iso"
+      - for:
+          var: PORT_FORWARDING_RULES
+        task: add-port-forwarding
+        vars:
+          INSTANCE: "{{.NAME}}"
+          RULE_NAME: "{{.ITEM.name}}"
+          PROTOCOL: "{{.ITEM.protocol}}"
+          HOST_PORT: "{{.ITEM.host_port}}"
+          GUEST_PORT: "{{.ITEM.guest_port}}"
+      - for:
+          var: NETWORK_INTERFACES
+        task: add-network-interface
+        vars:
+          INSTANCE: "{{.NAME}}"
+          NIC_NUM: "{{.ITEM.nic_num}}"
+          NETWORK_NAME: "{{.ITEM.network}}"
+    status:
+      - |
+        python3 '{{.TASKFILE_DIR}}/scripts/instance_exists.py' {{.NAME}}
+
+  create-minimal-instance:
+    requires:
+      vars:
+        - NAME
+        - GROUP
+        - BASE_DIR
+        - OS_TYPE
+    cmds:
+      - |
+        VBoxManage createvm \
+            --name={{.NAME}} \
+            --groups={{.GROUP}} \
+            --basefolder='{{.BASE_DIR}}' \
+            --ostype={{.OS_TYPE}} \
+            --register
+
+  update-instance:
+    requires:
+      vars:
+        - INSTANCE
+        - OPTS
+    cmds:
+      - |
+        VBoxManage modifyvm {{.INSTANCE}} \
+            {{.OPTS}}
+    status:
+      - test -z '{{.OPTS}}'
+
+  add-storage-controller:
+    requires:
+      vars:
+        - INSTANCE
+    cmds:
+      - |
+        VBoxManage storagectl {{.INSTANCE}} \
+            --name=virtio-scsi \
+            --add=virtio \
+            --controller=VirtIO \
+            --hostiocache=off \
+            --bootable=on
+
+  create-storage:
+    requires:
+      vars:
+        - STORAGE_FILE
+        - STORAGE_SIZE
+        - SOURCE_IMAGE_FILE
+    cmds:
+      - |
+        qemu-img convert \
+            -f qcow2 \
+            -O vdi \
+            '{{.SOURCE_IMAGE_FILE}}' \
+            '{{.STORAGE_FILE}}'
+      - |
+        VBoxManage modifymedium \
+            '{{.STORAGE_FILE}}' \
+            --resize={{mul .STORAGE_SIZE 1024}}
+
+  attach-storage:
+    requires:
+      vars:
+        - INSTANCE
+        - STORAGE_FILE
+    cmds:
+      - |
+        VBoxManage storageattach {{.INSTANCE}} \
+            --storagectl=virtio-scsi \
+            --port=0 \
+            --type=hdd \
+            --medium='{{.STORAGE_FILE}}'
+
+  create-seed-source:
+    requires:
+      vars:
+        - SOURCE_DIR
+        - HOSTNAME
+        - SSH_AUTHORIZED_KEY
+    cmds:
+      - mkdir '{{.SOURCE_DIR}}'
+      - |
+        cat <<__EOF__ > '{{.SOURCE_DIR}}/meta-data'
+        local-hostname: {{.HOSTNAME}}
+        __EOF__
+      - |
+        cat <<__EOF__ > '{{.SOURCE_DIR}}/user-data'
+        #cloud-config
+        ssh_authorized_keys:
+          - {{.SSH_AUTHORIZED_KEY}}
+        __EOF__
+
+  create-seed:
+    requires:
+      vars:
+        - SEED_FILE
+        - SOURCE_DIR
+    cmds:
+      - |
+        hdiutil makehybrid \
+            -o '{{.SEED_FILE}}' \
+            -hfs \
+            -joliet \
+            -iso \
+            -default-volume-name cidata \
+            '{{.SOURCE_DIR}}'
+
+  attach-seed:
+    requires:
+      vars:
+        - INSTANCE
+        - SEED_FILE
+    cmds:
+      - |
+        VBoxManage storageattach {{.INSTANCE}} \
+            --storagectl=virtio-scsi \
+            --port=1 \
+            --type=dvddrive \
+            --medium='{{.SEED_FILE}}'
+
+  add-port-forwarding:
+    requires:
+      vars:
+        - INSTANCE
+        - RULE_NAME
+        - PROTOCOL
+        - HOST_PORT
+        - GUEST_PORT
+    cmds:
+      - task: update-instance
+        vars:
+          INSTANCE: "{{.INSTANCE}}"
+          OPTS: >-
+            --nat-pf1={{.RULE_NAME}},{{.PROTOCOL}},127.0.0.1,{{.HOST_PORT}},,{{.GUEST_PORT}}
+
+  add-network-interface:
+    requires:
+      vars:
+        - INSTANCE
+        - NIC_NUM
+        - NETWORK_NAME
+    cmds:
+      - task: update-instance
+        vars:
+          INSTANCE: "{{.INSTANCE}}"
+          OPTS: >-
+            --nic{{.NIC_NUM}}=intnet
+            --nic-type{{.NIC_NUM}}=virtio
+            --nic-promisc{{.NIC_NUM}}=deny
+            --mac-address{{.NIC_NUM}}=auto
+            --cable-connected{{.NIC_NUM}}=on
+            --intnet{{.NIC_NUM}}={{.NETWORK_NAME}}
+
+  start-instance:
+    requires:
+      vars:
+        - NAME
+    cmds:
+      - VBoxManage startvm {{.NAME}} --type=headless
+
+  poweroff-instance:
+    requires:
+      vars:
+        - NAME
+    cmds:
+      - VBoxManage controlvm {{.NAME}} poweroff
+
+  delete-instance:
+    requires:
+      vars:
+        - NAME
+    cmds:
+      - |
+        VBoxManage unregistervm \
+            {{.NAME}} \
+            --delete-all
+    status:
+      - |
+        python3 '{{.TASKFILE_DIR}}/scripts/instance_exists.py' --not-exists {{.NAME}}

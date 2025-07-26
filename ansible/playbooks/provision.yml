@@ -1,0 +1,24 @@
+---
+- name: Example tasks for all instances
+  hosts: infrastructure
+  tasks:
+    - name: Configure network interface IP address
+      ansible.builtin.command: ip address add {{ interface_cidr }} dev {{ interface_name }}
+    
+    - name: Enable network interface
+      ansible.builtin.command: ip link set dev {{ interface_name }} up
+
+- name: Example tasks for server instances
+  hosts: servers
+  tasks:
+    - name: Install nginx
+      ansible.builtin.package:
+        name:
+          - nginx
+        state: present
+        update_cache: true
+
+    - name: Start nginx
+      ansible.builtin.service:
+        name: nginx
+        state: started

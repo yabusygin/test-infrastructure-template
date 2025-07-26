@@ -1,0 +1,24 @@
+# https://taskfile.dev
+
+version: "3"
+
+tasks:
+  install-collections:
+    requires:
+      vars:
+        - ANSIBLE_GALAXY
+        - REQUIREMENTS_FILE
+    cmds:
+      - |
+        '{{.ANSIBLE_GALAXY}}' collection install \
+            --requirements-file='{{.REQUIREMENTS_FILE}}'
+
+  install-roles:
+    requires:
+      vars:
+        - ANSIBLE_GALAXY
+        - REQUIREMENTS_FILE
+    cmds:
+      - |
+        '{{.ANSIBLE_GALAXY}}' role install \
+            --role-file='{{.REQUIREMENTS_FILE}}'

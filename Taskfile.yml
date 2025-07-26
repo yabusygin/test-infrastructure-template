@@ -1,0 +1,189 @@
+# https://taskfile.dev
+
+version: "3"
+
+vars:
+  INFRASTRUCTURE_CONFIG_FILE: "{{.TASKFILE_DIR}}/infrastructure.yml"
+  SOURCE_IMAGES_DIR: "{{.TASKFILE_DIR}}/images"
+  SSH_DIR: "{{.TASKFILE_DIR}}/ssh"
+  VIRTUALBOX_DIR: "{{.TASKFILE_DIR}}/virtualbox"
+  ANSIBLE_DIR: "{{.TASKFILE_DIR}}/ansible"
+
+includes:
+  curl: tasks/curl
+  python: tasks/python
+  ssh: tasks/ssh
+  virtualbox: tasks/virtualbox
+  ansible: tasks/ansible
+
+tasks:
+  create:
+    vars:
+      SOURCE_IMAGES_JSON:
+        sh: |
+          yq --output-format=json \
+              '.source_images | to_entries | map(.value)' \
+              '{{.INFRASTRUCTURE_CONFIG_FILE}}'
+      SOURCE_IMAGES:
+        ref: fromJson .SOURCE_IMAGES_JSON
+      INSTANCES_JSON:
+        sh: |
+          yq --output-format=json \
+              '
+                  .source_images as $source_images
+                  | .defaults.os_type as $default_os_type
+                  | .defaults.source_image as $default_source_image
+                  | .defaults.cpus as $default_cpus
+                  | .defaults.memory as $default_memory
+                  | .defaults.storage as $default_storage
+                  | .defaults.opts as $default_opts
+                  | .defaults.user as $default_user
+                  | .instances
+                  | with(
+                      .[];
+                      .os_type = .os_type // $default_os_type
+                      | .source_image = .source_image // $default_source_image
+                      | .source_image_file = "{{.SOURCE_IMAGES_DIR}}/" + $source_images[.source_image].filename
+                      | .cpus = .cpus // $default_cpus
+                      | .memory = .memory // $default_memory
+                      | .storage = .storage // $default_storage
+                      | .opts = .opts // $default_opts
+                      | .user = .user // $default_user
+                      | .management_interface.port_forwarding.custom_rules = .management_interface.port_forwarding.custom_rules // []
+                      | .interfaces = .interfaces // []
+                      | with(.interfaces[]; .nic_num = (. | key) + 2)
+                  )
+              ' \
+              '{{.INFRASTRUCTURE_CONFIG_FILE}}'
+      INSTANCES:
+        ref: fromJson .INSTANCES_JSON
+    cmds:
+      - mkdir -p '{{.SOURCE_IMAGES_DIR}}'
+      - for:
+          var: SOURCE_IMAGES
+        task: curl:download
+        vars:
+          SOURCE_URL: "{{.ITEM.url}}"
+          DESTINATION_FILE: "{{.SOURCE_IMAGES_DIR}}/{{.ITEM.filename}}"
+      - task: ssh:create-client-dir
+        vars:
+          CLIENT_DIR: "{{.SSH_DIR}}"
+          USER:
+            sh: yq .default_user '{{.INFRASTRUCTURE_CONFIG_FILE}}'
+          KEY_COMMENT: infrastructure
+          HOSTS:
+            sh: |
+              yq --output-format=json \
+                  '
+                      .defaults.user as $default_user
+                      | .instances
+                      | map(
+                          {
+                              "host": .name,
+                              "port": .management_interface.port_forwarding.ssh_rule.host_port,
+                              "user": .user // $default_user
+                          }
+                      )
+                  ' \
+                  '{{.INFRASTRUCTURE_CONFIG_FILE}}'
+      - for:
+          var: INSTANCES
+        task: virtualbox:create-instance
+        vars:
+          NAME: "{{.ITEM.name}}"
+          GROUP:
+            sh: yq '.group' '{{.INFRASTRUCTURE_CONFIG_FILE}}'
+          BASE_DIR: "{{.VIRTUALBOX_DIR}}"
+          OS_TYPE: "{{.ITEM.os_type}}"
+          SOURCE_IMAGE_FILE: "{{.ITEM.source_image_file}}"
+          CPUS: "{{.ITEM.cpus}}"
+          MEMORY: "{{.ITEM.memory}}"
+          OPTS: "{{.ITEM.opts}}"
+          STORAGE_SIZE: "{{.ITEM.storage}}"
+          HOST_SSH_PORT: "{{.ITEM.management_interface.port_forwarding.ssh_rule.host_port}}"
+          SSH_AUTHORIZED_KEY:
+            sh: cat '{{.SSH_DIR}}/id_ed25519.pub'
+          PORT_FORWARDING_RULES: "{{.ITEM.management_interface.port_forwarding.custom_rules | toJson}}"
+          NETWORK_INTERFACES: "{{.ITEM.interfaces | toJson}}"
+
+  start:
+    vars:
+      INSTANCES_JSON:
+        sh: |
+            yq --output-format=json \
+                '.instances | map(.name)' \
+                '{{.INFRASTRUCTURE_CONFIG_FILE}}'
+      INSTANCES:
+        ref: fromJson .INSTANCES_JSON
+    cmds:
+      - for:
+          var: INSTANCES
+        task: virtualbox:start-instance
+        vars:
+          NAME: "{{.ITEM}}"
+
+  poweroff:
+    vars:
+      INSTANCES_JSON:
+        sh: |
+            yq --output-format=json \
+                '.instances | map(.name)' \
+                '{{.INFRASTRUCTURE_CONFIG_FILE}}'
+      INSTANCES:
+        ref: fromJson .INSTANCES_JSON
+    cmds:
+      - for:
+          var: INSTANCES
+        task: virtualbox:poweroff-instance
+        vars:
+          NAME: "{{.ITEM}}"
+
+  delete:
+    vars:
+      INSTANCES_JSON:
+        sh: |
+            yq --output-format=json \
+                '.instances | map(.name)' \
+                '{{.INFRASTRUCTURE_CONFIG_FILE}}'
+      INSTANCES:
+        ref: fromJson .INSTANCES_JSON
+    cmds:
+      - for:
+          var: INSTANCES
+        task: virtualbox:delete-instance
+        vars:
+          NAME: "{{.ITEM}}"
+      - rm -r -f '{{.VIRTUALBOX_DIR}}'
+      - rm -r -f '{{.SSH_DIR}}'
+
+  delete-all:
+    cmds:
+      - task: delete
+      - rm -r -f '{{.SOURCE_IMAGES_DIR}}'
+      - rm -r -f '{{.ANSIBLE_DIR}}/collections'
+      - rm -r -f '{{.ANSIBLE_DIR}}/roles'
+      - rm -r -f '{{.ANSIBLE_DIR}}/venv'
+
+  ansible-requirements:
+    cmds:
+      - task: python:create-venv
+        vars:
+          VENV_DIR: "{{.ANSIBLE_DIR}}/venv"
+      - task: python:install-requirements
+        vars:
+          VENV_DIR: "{{.ANSIBLE_DIR}}/venv"
+          REQUIREMENTS_FILE: "{{.ANSIBLE_DIR}}/requirements.txt"
+      - task: ansible:install-collections
+        vars:
+          ANSIBLE_GALAXY: "{{.ANSIBLE_DIR}}/venv/bin/ansible-galaxy"
+          REQUIREMENTS_FILE: "{{.ANSIBLE_DIR}}/requirements.yml"
+      - task: ansible:install-roles
+        vars:
+          ANSIBLE_GALAXY: "{{.ANSIBLE_DIR}}/venv/bin/ansible-galaxy"
+          REQUIREMENTS_FILE: "{{.ANSIBLE_DIR}}/requirements.yml"
+
+  provision:
+    cmds:
+      - |
+        '{{.ANSIBLE_DIR}}/venv/bin/ansible-playbook' \
+            '{{.ANSIBLE_DIR}}/playbooks/provision.yml'

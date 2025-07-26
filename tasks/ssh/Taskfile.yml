@@ -1,0 +1,73 @@
+# https://taskfile.dev
+
+version: "3"
+
+tasks:
+  create-client-dir:
+    requires:
+      vars:
+        - CLIENT_DIR
+        - USER
+        - HOSTS
+    vars:
+      KEY_TYPE: '{{.KEY_TYPE | default "ed25519"}}'
+      KEY_COMMENT: "{{.KEY_COMMENT}}"
+      KEY_FILE: "{{.CLIENT_DIR}}/id_{{.KEY_TYPE}}"
+    cmds:
+      - mkdir -p -m u=rwx,g=,o= '{{.CLIENT_DIR}}'
+      - task: generate-key
+        vars:
+          TYPE: "{{.KEY_TYPE}}"
+          COMMENT: "{{.KEY_COMMENT}}"
+          FILE: "{{.KEY_FILE}}"
+      - task: create-config
+        vars:
+          HOST_KEY_CHECKING: accept-new
+          KNOWN_HOSTS_FILE: "{{.CLIENT_DIR}}/known_hosts"
+          USER: "{{.USER}}"
+          KEY_FILE: "{{.KEY_FILE}}"
+          HOSTS: "{{.HOSTS}}"
+          CONFIG_FILE: "{{.CLIENT_DIR}}/config"
+    status:
+      - test -d '{{.CLIENT_DIR}}'
+
+  generate-key:
+    requires:
+      vars:
+        - FILE
+    vars:
+      TYPE: '{{.TYPE | default "ed25519"}}'
+      COMMENT: "{{.COMMENT}}"
+    cmds:
+      - |
+        ssh-keygen \
+            -t {{.TYPE}} \
+            -C '{{.COMMENT}}' \
+            -N '' \
+            -f '{{.FILE}}'
+
+  create-config:
+    requires:
+      vars:
+        - CONFIG_FILE
+        - HOST_KEY_CHECKING
+        - KNOWN_HOSTS_FILE
+        - KEY_FILE
+        - HOSTS
+    vars:
+      HOSTS:
+        ref: fromJson .HOSTS
+    cmds:
+      - |
+        cat <<__EOF__ > '{{.CONFIG_FILE}}'
+        Hostname 127.0.0.1
+        StrictHostKeyChecking {{.HOST_KEY_CHECKING}}
+        UserKnownHostsFile {{.KNOWN_HOSTS_FILE}}
+        IdentityFile {{.KEY_FILE}}
+        IdentitiesOnly yes
+        {{- range $item := .HOSTS}}
+        Host {{$item.host}}
+            Port {{$item.port}}
+            User {{$item.user}}
+        {{- end}}
+        __EOF__

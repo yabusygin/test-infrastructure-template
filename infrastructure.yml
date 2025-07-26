@@ -1,0 +1,117 @@
+# OS distribution and platform specific configuration
+# see also: ansible/inventory/hosts.yml
+#
+# source_images:
+#   debian_amd64:
+#     url: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
+#     filename: debian-12-genericcloud-amd64.qcow2
+# defaults:
+#   os_type: Debian12_64
+#   source_image: debian_amd64
+#   cpus: 1
+#   memory: 2048
+#   storage: 5
+#   opts: >-
+#     --firmware=efi
+#     --graphicscontroller=vmsvga
+#     --vram=16
+#     --audio-enabled=off
+#   user: debian
+#
+# source_images:
+#   debian_arm64:
+#     url: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-arm64.qcow2
+#     filename: debian-12-genericcloud-arm64.qcow2
+# defaults:
+#   os_type: Debian12_arm64
+#   source_image: debian_arm64
+#   cpus: 1
+#   memory: 2048
+#   storage: 5
+#   opts: >-
+#     --firmware=efi
+#     --chipset=armv8virtual
+#     --graphicscontroller=vmsvga
+#     --vram=16
+#     --audio-enabled=off
+#   user: debian
+#
+# source_images:
+#   ubuntu:
+#     url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+#     filename: noble-server-cloudimg-amd64.img
+# defaults:
+#   os_type: Ubuntu24_LTS_64
+#   source_image: ubuntu
+#   cpus: 1
+#   memory: 2048
+#   storage: 5
+#   common_opts: >-
+#     --firmware=efi
+#     --graphicscontroller=vmsvga
+#     --vram=16
+#     --audio-enabled=off
+#   user: ubuntu
+#
+# source_images:
+#   centos:
+#     url: https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2
+#     filename: CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2
+# defaults:
+#   os_type: RedHat9_64
+#   source_image: centos
+#   cpus: 1
+#   memory: 2048
+#   storage: 10
+#   opts: >-
+#     --graphicscontroller=vmsvga
+#     --vram=16
+#     --audio-enabled=off
+#   user: cloud-user
+
+group: /test-infrastructure-example
+source_images:
+  debian:
+    url: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
+    filename: debian-12-genericcloud-amd64.qcow2
+  ubuntu:
+    url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+    filename: noble-server-cloudimg-amd64.img
+defaults:
+  os_type: Debian12_64
+  source_image: debian
+  cpus: 1
+  memory: 2048
+  storage: 5
+  opts: >-
+    --firmware=efi
+    --graphicscontroller=vmsvga
+    --vram=16
+    --audio-enabled=off
+  user: debian
+instances:
+  - name: alice
+    management_interface:
+      port_forwarding:
+        ssh_rule:
+          host_port: 10022
+    interfaces:
+      - network: test-infrastructure
+  - name: bob
+    os_type: Ubuntu24_LTS_64
+    source_image: ubuntu
+    cpus: 2
+    memory: 4096
+    storage: 20
+    management_interface:
+      port_forwarding:
+        ssh_rule:
+          host_port: 20022
+        custom_rules:
+          - name: http
+            protocol: tcp
+            host_port: 20080
+            guest_port: 80
+    interfaces:
+      - network: test-infrastructure
+    user: ubuntu

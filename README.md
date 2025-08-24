@@ -57,6 +57,10 @@ Example infrastructure:
 +--------------------------------------------+
 ```
 
+**Note.** This example is configured for amd64 hosts. For arm64 (Apple silicon)
+hosts update `infrastructure.yml` and `ansible/inventory/hosts.yml` files
+according to the instructions in comments.
+
 Create VirtualBox infrastructure (instances and networks):
 
 ```sh

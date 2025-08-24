@@ -37,17 +37,35 @@
 #   user: debian
 #
 # source_images:
-#   ubuntu:
+#   ubuntu_amd64:
 #     url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
 #     filename: noble-server-cloudimg-amd64.img
 # defaults:
 #   os_type: Ubuntu24_LTS_64
-#   source_image: ubuntu
+#   source_image: ubuntu_amd64
 #   cpus: 1
 #   memory: 2048
 #   storage: 5
 #   common_opts: >-
 #     --firmware=efi
+#     --graphicscontroller=vmsvga
+#     --vram=16
+#     --audio-enabled=off
+#   user: ubuntu
+#
+# source_images:
+#   ubuntu_arm64:
+#     url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64.img
+#     filename: noble-server-cloudimg-arm64.img
+# defaults:
+#   os_type: Ubuntu24_LTS_arm64
+#   source_image: ubuntu_arm64
+#   cpus: 1
+#   memory: 2048
+#   storage: 5
+#   common_opts: >-
+#     --firmware=efi
+#     --chipset=armv8virtual
 #     --graphicscontroller=vmsvga
 #     --vram=16
 #     --audio-enabled=off

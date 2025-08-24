@@ -25,7 +25,7 @@ Cloud image requirements:
 Requirements
 ------------
 
-- macOS or Linux host
+- macOS
 - [Task](https://taskfile.dev/docs/installation)
 - [Python 3](https://docs.python.org/3/using/index.html)
 - [VirtualBox](https://www.virtualbox.org/manual/ch02.html)
